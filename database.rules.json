@@ -10,7 +10,13 @@
           ".validate": "newData.hasChildren(['choices', 'at'])",
           "choices": {
             "$i": {
-              ".validate": "($i === '0' || $i === '1' || $i === '2' || $i === '3') && newData.isString() && newData.val().length <= 60"
+              ".validate": "($i === '0' || $i === '1' || $i === '2' || $i === '3') && ((newData.isString() && newData.val().length <= 60) || newData.hasChildren(['name', 'sugar', 'ice']))",
+              "name": { ".validate": "newData.isString() && newData.val().length <= 60" },
+              "size": { ".validate": "newData.val() === 'M' || newData.val() === 'L'" },
+              "sugar": { ".validate": "newData.val() === 100 || newData.val() === 70 || newData.val() === 50 || newData.val() === 30 || newData.val() === 0" },
+              "ice": { ".validate": "newData.val() === 100 || newData.val() === 70 || newData.val() === 50 || newData.val() === 30 || newData.val() === 0" },
+              "note": { ".validate": "newData.isString() && newData.val().length <= 100" },
+              "$other": { ".validate": false }
             }
           },
           "at": { ".validate": "newData.isNumber()" },

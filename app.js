@@ -2,6 +2,7 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebas
 import {
   getDatabase, ref, onValue, set, remove, serverTimestamp,
 } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-database.js';
+import { MENU } from './menu.js';
 
 // Config web của Firebase vốn công khai; quyền ghi do database.rules.json quyết định.
 const firebaseConfig = {
@@ -22,14 +23,15 @@ const MEMBERS = [
   { id: 'minh-tuan', name: 'Minh Tuấn' },
 ];
 
-const STATUS_HINT = 'Gõ xong là tự chốt, khỏi bấm gì.';
+const STATUS_HINT = 'Chọn xong là tự chốt, khỏi bấm gì.';
 const STATUS_DONE = 'Đã chốt!';
 const AUTOSAVE_MS = 600;
 const STORAGE_KEY = 'chon-nuoc-me';
 const WEEKDAYS = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
+const LEVELS = [100, 70, 50, 30, 0];
+const DEFAULT_LEVEL = 100;
 
 const $ = (id) => document.getElementById(id);
-const inputs = [...document.querySelectorAll('.tier-input')];
 const pad = (n) => String(n).padStart(2, '0');
 
 function dayKey(d = new Date()) {
@@ -53,28 +55,122 @@ function saveMe(id) {
   }
 }
 
+const blank = () => ({ name: '', size: '', sugar: DEFAULT_LEVEL, ice: DEFAULT_LEVEL, note: '' });
+
+// Dữ liệu cũ lưu mỗi món là một chuỗi; ô trống là ''.
+function normalize(stored) {
+  if (!stored) return blank();
+  if (typeof stored === 'string') return { ...blank(), name: stored };
+  return { ...blank(), ...stored };
+}
+
+function toStored(choice) {
+  const name = choice.name.trim();
+  if (!name) return '';
+  const stored = { name, sugar: choice.sugar, ice: choice.ice };
+  if (choice.size) stored.size = choice.size;
+  const note = choice.note.trim();
+  if (note) stored.note = note;
+  return stored;
+}
+
+const choiceKey = (c) => [c.name.trim(), c.size, c.sugar, c.ice, c.note.trim()].join('|');
+
+function describe(c) {
+  const parts = [c.name];
+  if (c.size) parts.push(`Size ${c.size}`);
+  if (c.sugar !== DEFAULT_LEVEL) parts.push(`Đường ${c.sugar}%`);
+  if (c.ice !== DEFAULT_LEVEL) parts.push(`Đá ${c.ice}%`);
+  if (c.note) parts.push(c.note);
+  return parts.join(' · ');
+}
+
 const db = getDatabase(initializeApp(firebaseConfig));
 const day = dayKey();
 const orderRef = (memberId) => ref(db, `orders/${day}/${memberId}`);
 
 let me = loadMe();
 let orders = null; // null = chưa tải xong
-let dirty = false; // có chữ vừa gõ chưa lưu xong
+let draft = Array.from({ length: 4 }, blank);
+let dirty = false; // có thay đổi chưa lưu xong
 let editVersion = 0;
 let saveTimer = null;
+let pickingTier = 0;
 
 function showBanner(text) {
   $('banner').textContent = text;
   $('banner').hidden = !text;
 }
 
-function fillMyInputs() {
-  const choices = (orders && me && orders[me]?.choices) || [];
-  inputs.forEach((input, i) => {
-    const saved = choices[i] ?? '';
-    // So sánh sau trim để không ăn mất dấu cách của chữ đang gõ dở.
-    if (input.value.trim() !== saved) input.value = saved;
+function makeSelect(label, options, onChange) {
+  const select = document.createElement('select');
+  select.className = 'opt';
+  select.setAttribute('aria-label', label);
+  options.forEach(([value, text]) => select.add(new Option(text, value)));
+  select.addEventListener('change', () => onChange(select.value));
+  return select;
+}
+
+const levelOptions = (label) => LEVELS.map((v) => [String(v), `${label} ${v}%`]);
+
+function markDirty() {
+  dirty = true;
+  editVersion += 1;
+}
+
+function updateChoice(i, patch) {
+  Object.assign(draft[i], patch);
+  markDirty();
+  saveNow();
+}
+
+const controls = [...document.querySelectorAll('.tier')].map((tier, i) => {
+  const pick = tier.querySelector('.tier-pick');
+  pick.addEventListener('click', () => openPicker(i));
+
+  const size = makeSelect('Size', [['M', 'Size M'], ['L', 'Size L']], (v) => updateChoice(i, { size: v }));
+  const sugar = makeSelect('Đường', levelOptions('Đường'), (v) => updateChoice(i, { sugar: Number(v) }));
+  const ice = makeSelect('Đá', levelOptions('Đá'), (v) => updateChoice(i, { ice: Number(v) }));
+
+  const note = document.createElement('input');
+  note.className = 'opt-note';
+  note.maxLength = 100;
+  note.placeholder = 'Ghi chú (topping, ít ngọt...)';
+  note.setAttribute('aria-label', 'Ghi chú');
+  note.addEventListener('input', () => {
+    draft[i].note = note.value;
+    markDirty();
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveNow, AUTOSAVE_MS);
   });
+  note.addEventListener('blur', saveNow);
+
+  const opts = document.createElement('div');
+  opts.className = 'opts';
+  opts.append(size, sugar, ice, note);
+  tier.append(opts);
+
+  return { pick, opts, size, sugar, ice, note };
+});
+
+function renderTier(i) {
+  const c = draft[i];
+  const ui = controls[i];
+  ui.pick.textContent = c.name || 'Chọn món...';
+  ui.pick.classList.toggle('is-empty', !c.name);
+  ui.opts.hidden = !c.name;
+  ui.size.hidden = !c.size;
+  ui.size.value = c.size || 'M';
+  ui.sugar.value = String(c.sugar);
+  ui.ice.value = String(c.ice);
+  // So sánh sau trim để không ăn mất dấu cách của chữ đang gõ dở.
+  if (ui.note.value.trim() !== c.note) ui.note.value = c.note;
+}
+
+function loadDraft() {
+  const saved = (orders && me && orders[me]?.choices) || [];
+  draft = draft.map((_, i) => normalize(saved[i]));
+  draft.forEach((_, i) => renderTier(i));
   dirty = false;
 }
 
@@ -88,14 +184,14 @@ async function saveNow() {
   if (!dirty || !me) return;
 
   const version = editVersion;
-  const choices = inputs.map((input) => input.value.trim());
   const saved = orders?.[me]?.choices || [];
-  if (choices.every((c, i) => c === (saved[i] ?? ''))) {
+  if (draft.every((c, i) => choiceKey(c) === choiceKey(normalize(saved[i])))) {
     dirty = false;
     syncStatus();
     return;
   }
 
+  const choices = draft.map(toStored);
   const memberRef = orderRef(me);
   $('status').textContent = 'Đang chốt...';
   try {
@@ -107,37 +203,45 @@ async function saveNow() {
     }
   } catch (err) {
     console.error(err);
-    $('status').textContent = 'Chưa lưu được, gõ lại thử nha.';
+    $('status').textContent = 'Chưa lưu được, chọn lại thử nha.';
   }
 }
 
 function renderOthers() {
   const rows = MEMBERS.filter((m) => m.id !== me).map((m) => {
-    const picks = (orders?.[m.id]?.choices || []).filter(Boolean);
+    const picks = (orders?.[m.id]?.choices || []).map(normalize).filter((c) => c.name);
     const row = document.createElement('div');
     row.className = picks.length ? 'row' : 'row empty';
 
     const name = document.createElement('div');
     name.className = 'row-name';
     name.textContent = m.name;
+    row.append(name);
 
-    const text = document.createElement('div');
-    text.className = 'row-picks';
-    if (orders === null) text.textContent = '...';
-    else text.textContent = picks.length ? picks.join(' › ') : 'Còn đang phân vân giữa nhiều mối…';
-
-    row.append(name, text);
+    if (picks.length) {
+      picks.forEach((c, i) => {
+        const line = document.createElement('div');
+        line.className = 'row-picks';
+        line.textContent = `${i + 1}. ${describe(c)}`;
+        row.append(line);
+      });
+    } else {
+      const line = document.createElement('div');
+      line.className = 'row-picks';
+      line.textContent = orders === null ? '...' : 'Còn đang phân vân giữa nhiều mối…';
+      row.append(line);
+    }
     return row;
   });
   $('others').replaceChildren(...rows);
 }
 
 function setMe(id) {
-  if (me !== id) saveNow(); // chữ đang gõ dở thuộc về tên cũ
+  if (me !== id) saveNow(); // thay đổi đang dở thuộc về tên cũ
   me = id;
   saveMe(id);
   $('whoBtn').textContent = `Tớ là: ${MEMBERS.find((m) => m.id === id).name}`;
-  fillMyInputs();
+  loadDraft();
   syncStatus();
   renderOthers();
 }
@@ -157,32 +261,89 @@ $('whoList').replaceChildren(...MEMBERS.map((m) => {
 $('whoBtn').addEventListener('click', () => $('whoDlg').showModal());
 $('whoDlg').addEventListener('cancel', (e) => { if (!me) e.preventDefault(); });
 
-// Menu: ảnh menu.jpg đặt cùng thư mục, chưa có thì báo chưa có.
-$('menuImg').addEventListener('load', () => { $('menuImg').hidden = false; });
-$('menuImg').addEventListener('error', () => { $('menuEmpty').hidden = false; });
-$('menuBtn').addEventListener('click', () => {
-  if (!$('menuImg').getAttribute('src')) $('menuImg').src = 'menu.jpg';
-  $('menuDlg').showModal();
+// Ảnh menu
+$('menuBtn').addEventListener('click', () => $('menuDlg').showModal());
+
+// Chọn món
+const fold = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd');
+
+function choose(name, hasSizes) {
+  draft[pickingTier] = { ...blank(), name, size: hasSizes ? 'M' : '' };
+  renderTier(pickingTier);
+  markDirty();
+  saveNow();
+  $('pickDlg').close();
+}
+
+function pickRow(label, price, onClick) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'pick-row';
+  const nameEl = document.createElement('span');
+  nameEl.textContent = label;
+  btn.append(nameEl);
+  if (price) {
+    const priceEl = document.createElement('span');
+    priceEl.className = 'pick-price';
+    priceEl.textContent = price;
+    btn.append(priceEl);
+  }
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+function renderPickList() {
+  const typed = $('pickSearch').value.trim();
+  const query = fold(typed);
+  const nodes = [];
+  let exact = false;
+
+  MENU.forEach(({ group, items }) => {
+    const matches = items.filter((item) => fold(item.name).includes(query));
+    if (!matches.length) return;
+    const heading = document.createElement('h3');
+    heading.className = 'pick-group';
+    heading.textContent = group;
+    nodes.push(heading);
+    matches.forEach((item) => {
+      if (fold(item.name) === query) exact = true;
+      const hasSizes = item.m !== undefined;
+      const price = hasSizes ? `M ${item.m}k · L ${item.l}k` : `${item.p}k`;
+      nodes.push(pickRow(item.name, price, () => choose(item.name, hasSizes)));
+    });
+  });
+
+  if (typed && !exact) nodes.unshift(pickRow(`Dùng tên "${typed}"`, '', () => choose(typed, false)));
+  $('pickList').replaceChildren(...nodes);
+}
+
+function openPicker(i) {
+  pickingTier = i;
+  $('pickSearch').value = '';
+  $('pickClear').hidden = !draft[i].name;
+  renderPickList();
+  $('pickDlg').showModal();
+}
+
+$('pickSearch').addEventListener('input', renderPickList);
+$('pickClose').addEventListener('click', () => $('pickDlg').close());
+$('pickClear').addEventListener('click', () => {
+  draft[pickingTier] = blank();
+  renderTier(pickingTier);
+  markDirty();
+  saveNow();
+  $('pickDlg').close();
 });
 
-// Tự lưu khi ngừng gõ, hoặc ngay khi rời ô / rời trang
-inputs.forEach((input) => {
-  input.addEventListener('input', () => {
-    dirty = true;
-    editVersion += 1;
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(saveNow, AUTOSAVE_MS);
-  });
-  input.addEventListener('blur', saveNow);
-});
+// Lưu khi rời trang, xoá hết
 window.addEventListener('pagehide', saveNow);
 
 $('clearBtn').addEventListener('click', () => {
-  if (inputs.every((input) => !input.value.trim())) return;
+  if (draft.every((c) => !c.name)) return;
   if (!window.confirm('Xoá hết món của cậu thật à?')) return;
-  inputs.forEach((input) => { input.value = ''; });
-  dirty = true;
-  editVersion += 1;
+  draft = draft.map(blank);
+  draft.forEach((_, i) => renderTier(i));
+  markDirty();
   saveNow();
 });
 
@@ -191,7 +352,7 @@ onValue(ref(db, `orders/${day}`), (snap) => {
   orders = snap.val() || {};
   showBanner('');
   if (!dirty) {
-    fillMyInputs();
+    loadDraft();
     syncStatus();
   }
   renderOthers();
@@ -219,6 +380,7 @@ document.addEventListener('visibilitychange', () => {
 // Khởi động
 const now = new Date();
 $('date').textContent = `${WEEKDAYS[now.getDay()]}, ${pad(now.getDate())}/${pad(now.getMonth() + 1)}`;
+draft.forEach((_, i) => renderTier(i));
 renderOthers();
 if (me) setMe(me);
 else $('whoDlg').showModal();
