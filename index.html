@@ -20,13 +20,15 @@
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Paytone+One&family=Nunito:wght@600;800&display=swap">
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
+<div class="pets-wide" data-pets="wide" aria-hidden="true"></div>
 <main class="page">
-  <header>
+  <header class="hero">
     <p class="date" id="date"></p>
     <h1>Hôm nay tớ muốn...</h1>
+    <div class="hero-pets" data-pets="hero" aria-hidden="true"></div>
   </header>
 
   <p class="banner" id="banner" role="status" hidden></p>
@@ -75,6 +77,7 @@
       <span class="tier-label">Miễn cưỡng lắm tớ mới uống:</span>
       <button type="button" class="tier-pick is-empty">Chọn món...</button>
       <span class="tier-note">Uống vì không còn ai.</span>
+      <div class="gap-pet" data-pets="gap" aria-hidden="true"></div>
     </div>
 
     <p class="status" id="status" role="status"></p>
@@ -134,6 +137,8 @@
       <div class="others" id="billRows"></div>
     </section>
   </div>
+
+  <div class="stage" data-pets="stage" aria-hidden="true"></div>
 </main>
 
 <dialog id="whoDlg" class="dlg">
@@ -169,11 +174,12 @@
 <!-- Cloudflare giữ file JS/CSS 4 giờ: mỗi lần sửa code hay STK thì tăng số v ở đây và ở style.css phía trên. -->
 <script type="importmap">
 { "imports": {
-  "./menu.js": "./menu.js?v=5",
-  "./accounts.js": "./accounts.js?v=5",
-  "./bill.js": "./bill.js?v=5"
+  "./menu.js": "./menu.js?v=6",
+  "./accounts.js": "./accounts.js?v=6",
+  "./bill.js": "./bill.js?v=6"
 } }
 </script>
-<script type="module" src="app.js?v=5"></script>
+<script type="module" src="app.js?v=6"></script>
+<script type="module" src="pets.js?v=6"></script>
 </body>
 </html>
