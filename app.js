@@ -78,12 +78,7 @@ function fillMyInputs() {
   dirty = false;
 }
 
-function syncClearBtn() {
-  $('clearBtn').hidden = inputs.every((input) => !input.value.trim());
-}
-
 function syncStatus() {
-  syncClearBtn();
   $('status').textContent = me && orders?.[me] ? STATUS_DONE : STATUS_HINT;
 }
 
@@ -175,7 +170,6 @@ inputs.forEach((input) => {
   input.addEventListener('input', () => {
     dirty = true;
     editVersion += 1;
-    syncClearBtn();
     clearTimeout(saveTimer);
     saveTimer = setTimeout(saveNow, AUTOSAVE_MS);
   });
@@ -184,11 +178,11 @@ inputs.forEach((input) => {
 window.addEventListener('pagehide', saveNow);
 
 $('clearBtn').addEventListener('click', () => {
+  if (inputs.every((input) => !input.value.trim())) return;
   if (!window.confirm('Xoá hết món của cậu thật à?')) return;
   inputs.forEach((input) => { input.value = ''; });
   dirty = true;
   editVersion += 1;
-  syncClearBtn();
   saveNow();
 });
 
