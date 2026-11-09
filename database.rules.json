@@ -1,0 +1,22 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "orders": {
+      "$day": {
+        ".read": "$day.length === 10",
+        "$member": {
+          ".write": "$day.length === 10 && ($member === 'mai-anh' || $member === 'duong-thuy' || $member === 'le-hanh' || $member === 'duy-cuyt' || $member === 'minh-tuan')",
+          ".validate": "newData.hasChildren(['choices', 'at'])",
+          "choices": {
+            "$i": {
+              ".validate": "($i === '0' || $i === '1' || $i === '2' || $i === '3') && newData.isString() && newData.val().length <= 60"
+            }
+          },
+          "at": { ".validate": "newData.isNumber()" },
+          "$other": { ".validate": false }
+        }
+      }
+    }
+  }
+}
