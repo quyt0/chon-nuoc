@@ -31,6 +31,7 @@ const STATUS_DONE = 'Đã chốt!';
 const AUTOSAVE_MS = 600;
 const STORAGE_KEY = 'chon-nuoc-me';
 const BANK_APP_KEY = 'chon-nuoc-bank-app';
+const TAB_KEY = 'chon-nuoc-tab';
 const AUTOFILL_APP = 'mb'; // theo danh sách của VietQR, trong 5 ngân hàng chỉ MB tự điền
 const SITE_URL = 'https://lela.izcuyt.com/';
 const WEEKDAYS = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
@@ -78,6 +79,35 @@ function saveBankApp(appId) {
   }
 }
 
+function loadTab() {
+  try {
+    return sessionStorage.getItem(TAB_KEY) === 'money' ? 'money' : 'order';
+  } catch {
+    return 'order';
+  }
+}
+
+function showTab(tab) {
+  const money = tab === 'money';
+  $('tabOrder').hidden = money;
+  $('tabMoney').hidden = !money;
+  $('tabOrderBtn').setAttribute('aria-pressed', String(!money));
+  $('tabMoneyBtn').setAttribute('aria-pressed', String(money));
+  try {
+    sessionStorage.setItem(TAB_KEY, tab);
+  } catch {
+    // Không lưu được thì tải lại trang sẽ về tab đầu.
+  }
+}
+
+function switchTab(tab) {
+  showTab(tab);
+  window.scrollTo(0, 0);
+}
+
+$('tabOrderBtn').addEventListener('click', () => switchTab('order'));
+$('tabMoneyBtn').addEventListener('click', () => switchTab('money'));
+
 const blank = () => ({ name: '', size: '', sugar: DEFAULT_LEVEL, ice: DEFAULT_LEVEL, note: '', toppings: [] });
 
 // Dữ liệu cũ lưu mỗi món là một chuỗi; ô trống là ''.
@@ -110,6 +140,16 @@ function describe(c) {
   return parts.join(' · ');
 }
 
+function optionSummary(c) {
+  return [
+    ...(c.size ? [`Size ${c.size}`] : []),
+    `Đường ${c.sugar}%`,
+    `Đá ${c.ice}%`,
+    ...c.toppings.map((t) => `+ ${t}`),
+    ...(c.note.trim() ? [c.note.trim()] : []),
+  ].join(' · ');
+}
+
 const db = getDatabase(initializeApp(firebaseConfig));
 const day = dayKey();
 const orderRef = (memberId) => ref(db, `orders/${day}/${memberId}`);
@@ -123,6 +163,8 @@ let editVersion = 0;
 let saveTimer = null;
 let reasonTimer = null;
 let pickingTier = 0;
+let openTier = null; // thẻ món đang mở phần tuỳ chọn
+let openBill = null; // bạn đang mở chi tiết trong bảng món thật
 let overrideFor = null; // đang chọn "Món khác" cho ai; null = chọn cho ô của tớ
 let transfer = null; // khoản tớ cần chuyển, null nếu không hiện QR
 let qrPng = null; // { url, blob: Promise<Blob> }, tạo sẵn để nút lưu ảnh chạy ngay
@@ -174,6 +216,7 @@ function markDirty() {
 
 function updateChoice(i, patch) {
   Object.assign(draft[i], patch);
+  renderSummary(i);
   markDirty();
   saveNow();
 }
@@ -202,6 +245,7 @@ const controls = [...document.querySelectorAll('.tier')].map((tier, i) => {
   note.setAttribute('aria-label', 'Ghi chú');
   note.addEventListener('input', () => {
     draft[i].note = note.value;
+    renderSummary(i);
     markDirty();
     clearTimeout(saveTimer);
     saveTimer = setTimeout(saveNow, AUTOSAVE_MS);
@@ -211,17 +255,41 @@ const controls = [...document.querySelectorAll('.tier')].map((tier, i) => {
   const opts = document.createElement('div');
   opts.className = 'opts';
   opts.append(size, sugar, ice, topping, note);
-  tier.append(opts);
 
-  return { pick, opts, size, sugar, ice, topping, note };
+  const summaryText = document.createElement('span');
+  const summaryAction = document.createElement('span');
+  summaryAction.className = 'opt-more';
+  const summary = document.createElement('button');
+  summary.type = 'button';
+  summary.className = 'opt-summary';
+  summary.append(summaryText, summaryAction);
+  summary.addEventListener('click', () => {
+    openTier = openTier === i ? null : i;
+    draft.forEach((_, n) => renderSummary(n));
+  });
+
+  tier.append(summary, opts);
+
+  return { pick, opts, summary, summaryText, summaryAction, size, sugar, ice, topping, note };
 });
+
+function renderSummary(i) {
+  const c = draft[i];
+  const ui = controls[i];
+  const open = openTier === i && Boolean(c.name);
+  ui.summary.hidden = !c.name;
+  ui.summary.setAttribute('aria-expanded', String(open));
+  ui.summaryText.textContent = optionSummary(c);
+  ui.summaryAction.textContent = open ? 'Xong' : 'Sửa';
+  ui.opts.hidden = !open;
+}
 
 function renderTier(i) {
   const c = draft[i];
   const ui = controls[i];
   ui.pick.textContent = c.name || 'Chọn món...';
   ui.pick.classList.toggle('is-empty', !c.name);
-  ui.opts.hidden = !c.name;
+  renderSummary(i);
   ui.size.hidden = !c.size;
   ui.size.value = c.size || 'M';
   ui.sugar.value = String(c.sugar);
@@ -357,6 +425,7 @@ function renderPayer() {
   $('payerBtn').hidden = absent || !me;
   if (!payer) $('payerBtn').textContent = 'Hôm nay tớ trả';
   else $('payerBtn').textContent = isMe ? 'Thôi, tớ không trả nữa' : 'Giành trả';
+  $('payerBtn').classList.toggle('quiet', Boolean(payer));
 
   const select = $('payerAccount');
   select.hidden = !isMe;
@@ -475,7 +544,7 @@ function renderBankLink() {
   $('bankHint').hidden = !appId || appId === AUTOFILL_APP;
   if (appId && transfer) {
     link.href = deepLink(transfer, appId);
-    link.textContent = `Mở app ${BANKS[appId.toUpperCase()].name}`;
+    link.setAttribute('aria-label', `Mở app ${BANKS[appId.toUpperCase()].name}`);
   }
 }
 
@@ -554,7 +623,7 @@ function setQr(next) {
   const url = qrUrl(next);
   const img = $('qrImg');
   if (img.getAttribute('src') !== url) img.src = url;
-  $('qrInfo').textContent = `${BANKS[next.account.bank].name} · ${next.account.no} · ${next.holder}`;
+  img.alt = `Mã QR chuyển khoản: ${BANKS[next.account.bank].name} · ${next.account.no} · ${next.holder}`;
   prepareQrPng(url);
   renderBankLink();
 }
@@ -628,11 +697,18 @@ function saveOverride(id, override) {
   setPerson(id, 'override', stored);
 }
 
+function drinkSummary(r) {
+  if (!r.choice) return 'Không uống gì';
+  const { name, size, toppings } = r.choice;
+  return [`${name}${size ? ` ${size}` : ''}`, ...toppings.map((t) => `+ ${t}`)].join(' · ');
+}
+
 function billRow(r) {
   const row = document.createElement('div');
   row.className = 'row bill-row';
+  const open = openBill === r.id;
 
-  const head = document.createElement('div');
+  const head = document.createElement('span');
   head.className = 'bill-head';
   const name = document.createElement('span');
   name.className = 'row-name';
@@ -642,29 +718,52 @@ function billRow(r) {
   if (r.rootId !== r.id) amount.textContent = `${memberName(r.rootId)} mời`;
   else amount.textContent = r.totalMissing ? 'Chưa có giá' : formatK(r.totalK);
   head.append(name, amount);
-  row.append(head);
 
-  const choices = (orders?.[r.id]?.choices || []).map(normalize);
-  const select = document.createElement('select');
-  select.className = 'opt bill-select';
-  select.setAttribute('aria-label', `Món thật của ${memberName(r.id)}`);
-  choices.forEach((c, i) => { if (c.name) select.add(new Option(drinkOptionLabel(c, `${i + 1}. `), String(i))); });
-  const override = person(r.id).override ? normalize(person(r.id).override) : null;
-  if (override) select.add(new Option(drinkOptionLabel(override, 'Khác: '), String(OVERRIDE_INDEX)));
-  select.add(new Option('Không uống gì', '-1'));
-  select.add(new Option('Món khác...', 'other'));
-  select.value = String(r.actual);
-  select.addEventListener('change', () => {
-    if (select.value === 'other') {
-      select.value = String(r.actual);
-      openOverridePicker(r.id);
-    } else {
-      setPerson(r.id, 'actual', Number(select.value));
-    }
+  const sub = document.createElement('span');
+  sub.className = 'bill-sub';
+  const drink = document.createElement('span');
+  drink.className = 'row-picks';
+  drink.textContent = drinkSummary(r);
+  const more = document.createElement('span');
+  more.className = 'opt-more';
+  more.textContent = open ? 'Xong' : 'Sửa';
+  sub.append(drink, more);
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'bill-toggle';
+  toggle.dataset.bill = r.id;
+  toggle.setAttribute('aria-expanded', String(open));
+  toggle.append(head, sub);
+  toggle.addEventListener('click', () => {
+    openBill = open ? null : r.id;
+    renderBillRows();
   });
-  row.append(select);
+  row.append(toggle);
 
-  if (r.actual === OVERRIDE_INDEX) {
+  if (open) {
+    const choices = (orders?.[r.id]?.choices || []).map(normalize);
+    const select = document.createElement('select');
+    select.className = 'opt bill-select';
+    select.setAttribute('aria-label', `Món thật của ${memberName(r.id)}`);
+    choices.forEach((c, i) => { if (c.name) select.add(new Option(drinkOptionLabel(c, `${i + 1}. `), String(i))); });
+    const override = person(r.id).override ? normalize(person(r.id).override) : null;
+    if (override) select.add(new Option(drinkOptionLabel(override, 'Khác: '), String(OVERRIDE_INDEX)));
+    select.add(new Option('Không uống gì', '-1'));
+    select.add(new Option('Món khác...', 'other'));
+    select.value = String(r.actual);
+    select.addEventListener('change', () => {
+      if (select.value === 'other') {
+        select.value = String(r.actual);
+        openOverridePicker(r.id);
+      } else {
+        setPerson(r.id, 'actual', Number(select.value));
+      }
+    });
+    row.append(select);
+  }
+
+  if (open && r.actual === OVERRIDE_INDEX) {
     const extras2 = document.createElement('div');
     extras2.className = 'opts';
     if (r.choice.size) {
@@ -682,7 +781,8 @@ function billRow(r) {
     row.append(extras2);
   }
 
-  if (r.needsManual) {
+  // Chưa có giá thì luôn hiện ô nhập, không thì cả nhóm kẹt không chuyển tiền được.
+  if (r.needsManual && (open || r.priceMissing)) {
     const price = document.createElement('input');
     price.className = 'opt-note';
     price.inputMode = 'numeric';
@@ -697,14 +797,14 @@ function billRow(r) {
   }
 
   const lines = billLines(r);
-  if (lines.length && r.rootId === r.id) {
+  if (open && lines.length && r.rootId === r.id) {
     const detail = document.createElement('div');
     detail.className = 'row-picks';
     detail.textContent = lines.join(' · ');
     row.append(detail);
   }
 
-  if (me && r.id !== me && !person(me).absent && bill.rows.get(me)?.going) {
+  if (open && me && r.id !== me && !person(me).absent && bill.rows.get(me)?.going) {
     const mine = r.treatedBy === me;
     if (mine || (!r.treatedBy && !reaches(me, r.id))) {
       const btn = document.createElement('button');
@@ -720,13 +820,20 @@ function billRow(r) {
 
 function renderBillRows() {
   const active = document.activeElement;
-  if (active && $('billRows').contains(active) && active.tagName !== 'BUTTON') return;
+  const inRows = Boolean(active && $('billRows').contains(active));
+  if (inRows && active.tagName !== 'BUTTON') return;
+  const focusId = inRows ? active.dataset.bill : undefined;
   const rows = MEMBERS.map((m) => bill.rows.get(m.id)).filter((r) => r?.going);
   $('billRows').replaceChildren(...rows.map(billRow));
+  if (focusId) $('billRows').querySelector(`[data-bill="${focusId}"]`)?.focus();
   $('billEmpty').hidden = rows.length > 0;
+  $('billHint').hidden = rows.length === 0;
 }
 
-$('billRows').addEventListener('focusout', () => setTimeout(renderBillRows, 0));
+// Vẽ bù sau khi rời ô nhập; bỏ qua nút vì nút vẫn được vẽ lại khi đang focus.
+$('billRows').addEventListener('focusout', (e) => {
+  if (e.target.tagName !== 'BUTTON') setTimeout(renderBillRows, 0);
+});
 
 function renderAll() {
   bill = computeBill(MEMBERS.map((m) => ({
@@ -740,11 +847,16 @@ function renderAll() {
   renderPayer();
   renderSeeds();
   renderMyPay();
+  $('moneyBadge').hidden = !transfer;
+  $('moneyBadge').textContent = transfer ? `${transfer.amount / 1000}k` : '';
   renderBillRows();
 }
 
 function setMe(id) {
-  if (me !== id) saveNow(); // thay đổi đang dở thuộc về tên cũ
+  if (me !== id) {
+    saveNow(); // thay đổi đang dở thuộc về tên cũ
+    openTier = null;
+  }
   me = id;
   saveMe(id);
   $('whoBtn').textContent = `Tớ là: ${memberName(id)}`;
@@ -943,14 +1055,14 @@ document.addEventListener('visibilitychange', () => {
 // Khởi động
 $('bankApp').add(new Option('Chọn app ngân hàng của cậu', ''));
 Object.entries(BANKS).forEach(([key, bank]) => {
-  const appId = key.toLowerCase();
-  $('bankApp').add(new Option(appId === AUTOFILL_APP ? `${bank.name} (tự điền sẵn)` : bank.name, appId));
+  $('bankApp').add(new Option(bank.name, key.toLowerCase()));
 });
 $('bankApp').value = loadBankApp();
 if ($('bankApp').selectedIndex < 0) $('bankApp').value = '';
 
 const now = new Date();
 $('date').textContent = `${WEEKDAYS[now.getDay()]}, ${pad(now.getDate())}/${pad(now.getMonth() + 1)}`;
+showTab(loadTab());
 draft.forEach((_, i) => renderTier(i));
 renderAll();
 if (me) setMe(me);

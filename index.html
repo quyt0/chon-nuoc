@@ -20,7 +20,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Paytone+One&family=Nunito:wght@600;800&display=swap">
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 <main class="page">
@@ -39,6 +39,12 @@
     </button>
   </div>
 
+  <div class="tabs">
+    <button type="button" class="tab" id="tabOrderBtn" aria-pressed="true">Chọn món</button>
+    <button type="button" class="tab" id="tabMoneyBtn" aria-pressed="false">Tiền nong <span class="tab-badge" id="moneyBadge" hidden></span></button>
+  </div>
+
+  <div class="panel" id="tabOrder">
   <div class="absent-box">
     <label class="absent-row"><input type="checkbox" id="absentBox"> Hôm nay tớ không đi</label>
     <input id="absentReason" class="opt-note" maxlength="100" placeholder="Lý do (bận, ốm, lười...)" aria-label="Lý do không đi" autocomplete="off" hidden>
@@ -79,9 +85,29 @@
     <h2>Mấy đứa kia viết gì:</h2>
     <div class="others" id="others"></div>
   </section>
+  </div>
 
-  <section>
-    <h2>Tiền nong:</h2>
+  <div class="panel" id="tabMoney" hidden>
+    <div class="pay-box" id="payBox" hidden>
+      <p class="pay-title" id="payTitle"></p>
+      <ul class="pay-lines" id="payLines"></ul>
+      <div id="qrWrap" hidden>
+        <img id="qrImg" alt="Mã QR chuyển khoản" width="300" height="360">
+        <div class="pay-actions">
+          <div class="bank-row">
+            <select class="opt" id="bankApp" aria-label="App ngân hàng của cậu"></select>
+            <a class="action action-main" id="openBank" hidden>Mở app</a>
+          </div>
+          <p class="row-picks" id="bankHint" hidden>App này chưa điền sẵn được, cậu lưu ảnh rồi vào app quét từ ảnh nha.</p>
+          <div class="copy-row">
+            <button type="button" class="action" id="saveQr">Lưu ảnh</button>
+            <button type="button" class="action" id="copyNo">Copy STK</button>
+            <button type="button" class="action" id="copyAmount">Copy tiền</button>
+          </div>
+          <p class="row-picks" id="qrMsg" role="status"></p>
+        </div>
+      </div>
+    </div>
 
     <div class="row payer-box">
       <p class="row-name" id="payerText"></p>
@@ -101,30 +127,13 @@
       <div class="row-picks" id="seedsInfo"></div>
     </div>
 
-    <div class="pay-box" id="payBox" hidden>
-      <p class="pay-title" id="payTitle"></p>
-      <ul class="pay-lines" id="payLines"></ul>
-      <div id="qrWrap" hidden>
-        <img id="qrImg" alt="Mã QR chuyển khoản" width="300" height="360">
-        <p class="row-picks" id="qrInfo"></p>
-        <div class="pay-actions">
-          <select class="opt" id="bankApp" aria-label="App ngân hàng của cậu"></select>
-          <a class="action action-main" id="openBank" hidden>Mở app ngân hàng</a>
-          <p class="row-picks" id="bankHint" hidden>App này chỉ mở được thôi. Cậu lưu ảnh QR rồi vào app chọn quét từ ảnh nha.</p>
-          <button type="button" class="action" id="saveQr">Lưu ảnh QR</button>
-          <div class="copy-row">
-            <button type="button" class="action" id="copyNo">Copy STK</button>
-            <button type="button" class="action" id="copyAmount">Copy số tiền</button>
-          </div>
-          <p class="row-picks" id="qrMsg" role="status"></p>
-        </div>
-      </div>
-    </div>
-
-    <h3 class="bill-title">Món thật mỗi đứa uống:</h3>
-    <p class="row-picks" id="billEmpty">Chưa có ai chọn món.</p>
-    <div class="others" id="billRows"></div>
-  </section>
+    <section>
+      <h2>Món thật mỗi đứa uống:</h2>
+      <p class="row-picks" id="billEmpty">Chưa có ai chọn món.</p>
+      <p class="row-picks" id="billHint" hidden>Bấm vào từng bạn để đổi món hoặc mời bạn ấy.</p>
+      <div class="others" id="billRows"></div>
+    </section>
+  </div>
 </main>
 
 <dialog id="whoDlg" class="dlg">
@@ -160,11 +169,11 @@
 <!-- Cloudflare giữ file JS/CSS 4 giờ: mỗi lần sửa code hay STK thì tăng số v ở đây và ở style.css phía trên. -->
 <script type="importmap">
 { "imports": {
-  "./menu.js": "./menu.js?v=4",
-  "./accounts.js": "./accounts.js?v=4",
-  "./bill.js": "./bill.js?v=4"
+  "./menu.js": "./menu.js?v=5",
+  "./accounts.js": "./accounts.js?v=5",
+  "./bill.js": "./bill.js?v=5"
 } }
 </script>
-<script type="module" src="app.js?v=4"></script>
+<script type="module" src="app.js?v=5"></script>
 </body>
 </html>
