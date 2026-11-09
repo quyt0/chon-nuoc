@@ -20,7 +20,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Paytone+One&family=Nunito:wght@600;800&display=swap">
-<link rel="stylesheet" href="style.css?v=3">
+<link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 <main class="page">
@@ -107,6 +107,17 @@
       <div id="qrWrap" hidden>
         <img id="qrImg" alt="Mã QR chuyển khoản" width="300" height="360">
         <p class="row-picks" id="qrInfo"></p>
+        <div class="pay-actions">
+          <select class="opt" id="bankApp" aria-label="App ngân hàng của cậu"></select>
+          <a class="action action-main" id="openBank" hidden>Mở app ngân hàng</a>
+          <p class="row-picks" id="bankHint" hidden>App này chỉ mở được thôi. Cậu lưu ảnh QR rồi vào app chọn quét từ ảnh nha.</p>
+          <button type="button" class="action" id="saveQr">Lưu ảnh QR</button>
+          <div class="copy-row">
+            <button type="button" class="action" id="copyNo">Copy STK</button>
+            <button type="button" class="action" id="copyAmount">Copy số tiền</button>
+          </div>
+          <p class="row-picks" id="qrMsg" role="status"></p>
+        </div>
       </div>
     </div>
 
@@ -149,11 +160,11 @@
 <!-- Cloudflare giữ file JS/CSS 4 giờ: mỗi lần sửa code hay STK thì tăng số v ở đây và ở style.css phía trên. -->
 <script type="importmap">
 { "imports": {
-  "./menu.js": "./menu.js?v=3",
-  "./accounts.js": "./accounts.js?v=3",
-  "./bill.js": "./bill.js?v=3"
+  "./menu.js": "./menu.js?v=4",
+  "./accounts.js": "./accounts.js?v=4",
+  "./bill.js": "./bill.js?v=4"
 } }
 </script>
-<script type="module" src="app.js?v=3"></script>
+<script type="module" src="app.js?v=4"></script>
 </body>
 </html>

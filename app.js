@@ -30,6 +30,9 @@ const STATUS_HINT = 'Chọn xong là tự chốt, khỏi bấm gì.';
 const STATUS_DONE = 'Đã chốt!';
 const AUTOSAVE_MS = 600;
 const STORAGE_KEY = 'chon-nuoc-me';
+const BANK_APP_KEY = 'chon-nuoc-bank-app';
+const AUTOFILL_APP = 'mb'; // theo danh sách của VietQR, trong 5 ngân hàng chỉ MB tự điền
+const SITE_URL = 'https://lela.izcuyt.com/';
 const WEEKDAYS = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
 const LEVELS = [100, 70, 50, 30, 0];
 const DEFAULT_LEVEL = 100;
@@ -56,6 +59,22 @@ function saveMe(id) {
     localStorage.setItem(STORAGE_KEY, id);
   } catch {
     // Không lưu được thì lần sau hỏi lại tên, vẫn dùng bình thường.
+  }
+}
+
+function loadBankApp() {
+  try {
+    return localStorage.getItem(BANK_APP_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function saveBankApp(appId) {
+  try {
+    localStorage.setItem(BANK_APP_KEY, appId);
+  } catch {
+    // Không lưu được thì lần sau chọn lại app.
   }
 }
 
@@ -105,6 +124,9 @@ let saveTimer = null;
 let reasonTimer = null;
 let pickingTier = 0;
 let overrideFor = null; // đang chọn "Món khác" cho ai; null = chọn cho ô của tớ
+let transfer = null; // khoản tớ cần chuyển, null nếu không hiện QR
+let qrPng = null; // { url, blob: Promise<Blob> }, tạo sẵn để nút lưu ảnh chạy ngay
+let qrMsgTimer = null;
 let bill = computeBill([], 0);
 
 function showBanner(text) {
@@ -388,13 +410,125 @@ $('seedsPlus').addEventListener('click', () => bumpSeeds(1));
 
 // ----- Tiền của tớ + QR -----
 
-function qrUrl(account, holder, amountK, payerName) {
+function transferNote(senderName) {
   const now = new Date();
-  const info = `nuoc ${pad(now.getDate())}${pad(now.getMonth() + 1)} ${fold(payerName)}`;
-  const name = fold(holder).toUpperCase();
-  return `https://img.vietqr.io/image/${BANKS[account.bank].bin}-${account.no}-compact2.png`
-    + `?amount=${amountK * 1000}&addInfo=${encodeURIComponent(info)}&accountName=${encodeURIComponent(name)}`;
+  return `nuoc ${pad(now.getDate())}${pad(now.getMonth() + 1)} ${fold(senderName)}`;
 }
+
+function qrUrl(transfer) {
+  const { account, holderAscii, amount, note } = transfer;
+  // Dùng thẳng .svg: link .png chỉ chuyển hướng sang .svg và bước chuyển hướng đó chặn fetch.
+  return `https://img.vietqr.io/image/${BANKS[account.bank].bin}-${account.no}-compact2.svg`
+    + `?amount=${amount}&addInfo=${encodeURIComponent(note)}&accountName=${encodeURIComponent(holderAscii)}`;
+}
+
+function deepLink(transfer, appId) {
+  const { account, holderAscii, amount, note } = transfer;
+  return `https://dl.vietqr.io/pay?app=${appId}&ba=${account.no}@${account.bank.toLowerCase()}`
+    + `&am=${amount}&tn=${encodeURIComponent(note)}&bn=${encodeURIComponent(holderAscii)}`
+    + `&url=${encodeURIComponent(SITE_URL)}`;
+}
+
+// App ngân hàng chỉ đọc được ảnh thường, nên đổi SVG của VietQR sang PNG.
+async function renderQrPng(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`QR ${res.status}`);
+  const blobUrl = URL.createObjectURL(new Blob([await res.text()], { type: 'image/svg+xml' }));
+  try {
+    const img = new Image();
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+      img.src = blobUrl;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = (img.naturalWidth || 500) * 2;
+    canvas.height = (img.naturalHeight || 600) * 2;
+    const ctx = canvas.getContext('2d');
+    const draw = () => {
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    };
+    // Safari có thể chưa vẽ ảnh nhúng trong SVG ở lần đầu.
+    draw();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    draw();
+    return await new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('empty png'))), 'image/png');
+    });
+  } finally {
+    URL.revokeObjectURL(blobUrl);
+  }
+}
+
+function prepareQrPng(url) {
+  if (qrPng?.url === url) return;
+  qrPng = { url, blob: renderQrPng(url) };
+  qrPng.blob.catch((err) => console.error(err));
+}
+
+function renderBankLink() {
+  const appId = $('bankApp').value;
+  const link = $('openBank');
+  link.hidden = !appId || !transfer;
+  $('bankHint').hidden = !appId || appId === AUTOFILL_APP;
+  if (appId && transfer) {
+    link.href = deepLink(transfer, appId);
+    link.textContent = `Mở app ${BANKS[appId.toUpperCase()].name}`;
+  }
+}
+
+function flashMessage(text) {
+  $('qrMsg').textContent = text;
+  clearTimeout(qrMsgTimer);
+  qrMsgTimer = setTimeout(() => { $('qrMsg').textContent = ''; }, 3000);
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    flashMessage(`Đã copy ${text}`);
+  } catch {
+    // Mở bằng http:// thì trình duyệt không cho copy tự động.
+    window.prompt('Copy đoạn này:', text);
+  }
+}
+
+async function saveQr() {
+  try {
+    const blob = await qrPng.blob;
+    const file = new File([blob], 'qr-chuyen-tien.png', { type: 'image/png' });
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+      || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    // iPhone: tải về sẽ vào app Tệp, phải qua menu chia sẻ mới lưu được vào Ảnh.
+    if (isIOS && navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file] });
+        return;
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+      }
+    }
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = file.name;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+    flashMessage('Đã lưu ảnh QR.');
+  } catch (err) {
+    console.error(err);
+    flashMessage('Chưa lưu được, cậu chụp màn hình giúp tớ nha.');
+  }
+}
+
+$('bankApp').addEventListener('change', () => {
+  saveBankApp($('bankApp').value);
+  renderBankLink();
+});
+$('saveQr').addEventListener('click', saveQr);
+$('copyNo').addEventListener('click', () => copyText(transfer.account.no));
+$('copyAmount').addEventListener('click', () => copyText(String(transfer.amount)));
 
 function billLines(r) {
   const lines = [];
@@ -413,12 +547,16 @@ function billLines(r) {
   return lines;
 }
 
-function setQr(url, infoText) {
+function setQr(next) {
+  transfer = next;
+  $('qrWrap').hidden = !next;
+  if (!next) return;
+  const url = qrUrl(next);
   const img = $('qrImg');
-  $('qrWrap').hidden = !url;
-  if (!url) return;
   if (img.getAttribute('src') !== url) img.src = url;
-  $('qrInfo').textContent = infoText;
+  $('qrInfo').textContent = `${BANKS[next.account.bank].name} · ${next.account.no} · ${next.holder}`;
+  prepareQrPng(url);
+  renderBankLink();
 }
 
 function renderMyPay() {
@@ -454,10 +592,13 @@ function renderMyPay() {
   } else {
     const holder = ACCOUNTS[payer.member].holder;
     $('payTitle').textContent = `Cậu chuyển cho ${memberName(payer.member)}: ${formatK(r.totalK)}`;
-    setQr(
-      qrUrl(payer.account, holder, r.totalK, memberName(me)),
-      `${BANKS[payer.account.bank].name} · ${payer.account.no} · ${holder}`,
-    );
+    setQr({
+      account: payer.account,
+      holder,
+      holderAscii: fold(holder).toUpperCase(),
+      amount: r.totalK * 1000,
+      note: transferNote(memberName(me)),
+    });
   }
 }
 
@@ -800,6 +941,14 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // Khởi động
+$('bankApp').add(new Option('Chọn app ngân hàng của cậu', ''));
+Object.entries(BANKS).forEach(([key, bank]) => {
+  const appId = key.toLowerCase();
+  $('bankApp').add(new Option(appId === AUTOFILL_APP ? `${bank.name} (tự điền sẵn)` : bank.name, appId));
+});
+$('bankApp').value = loadBankApp();
+if ($('bankApp').selectedIndex < 0) $('bankApp').value = '';
+
 const now = new Date();
 $('date').textContent = `${WEEKDAYS[now.getDay()]}, ${pad(now.getDate())}/${pad(now.getMonth() + 1)}`;
 draft.forEach((_, i) => renderTier(i));

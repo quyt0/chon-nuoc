@@ -171,6 +171,28 @@ h2 { font-size: 21px; }
 #qrWrap[hidden] { display: none; }
 #qrImg { display: block; width: 100%; max-width: 300px; height: auto; margin: 0 auto 8px; background: #FFFFFF; border-radius: 10px; }
 
+.pay-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.pay-actions p { margin: 0; }
+.pay-actions .opt { width: 100%; }
+.action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  padding: 0 12px;
+  background: #FFFFFF;
+  border: 2px solid var(--ink);
+  border-radius: 10px;
+  color: var(--ink);
+  font-weight: 800;
+  font-size: 16px;
+  text-decoration: none;
+}
+.action[hidden] { display: none; }
+.action-main { background: var(--pink-strong); }
+.copy-row { display: flex; gap: 8px; }
+.copy-row .action { flex: 1 1 0; }
+
 .bill-title { margin: 8px 0 0; font-family: var(--display); font-weight: 400; font-size: 18px; }
 .bill-row { display: flex; flex-direction: column; gap: 6px; }
 .bill-head { display: flex; justify-content: space-between; gap: 10px; }
