@@ -78,7 +78,12 @@ function fillMyInputs() {
   dirty = false;
 }
 
+function syncClearBtn() {
+  $('clearBtn').hidden = inputs.every((input) => !input.value.trim());
+}
+
 function syncStatus() {
+  syncClearBtn();
   $('status').textContent = me && orders?.[me] ? STATUS_DONE : STATUS_HINT;
 }
 
@@ -170,12 +175,22 @@ inputs.forEach((input) => {
   input.addEventListener('input', () => {
     dirty = true;
     editVersion += 1;
+    syncClearBtn();
     clearTimeout(saveTimer);
     saveTimer = setTimeout(saveNow, AUTOSAVE_MS);
   });
   input.addEventListener('blur', saveNow);
 });
 window.addEventListener('pagehide', saveNow);
+
+$('clearBtn').addEventListener('click', () => {
+  if (!window.confirm('Xoá hết món của cậu thật à?')) return;
+  inputs.forEach((input) => { input.value = ''; });
+  dirty = true;
+  editVersion += 1;
+  syncClearBtn();
+  saveNow();
+});
 
 // Dữ liệu realtime của hôm nay
 onValue(ref(db, `orders/${day}`), (snap) => {
