@@ -151,8 +151,10 @@ function optionSummary(c) {
 }
 
 const db = getDatabase(initializeApp(firebaseConfig));
-const day = dayKey();
-const orderRef = (memberId) => ref(db, `orders/${day}/${memberId}`);
+const day = dayKey(); // người trả, hướng dương, không đi, món thật vẫn tính theo từng ngày
+// Món giữ qua các ngày. Security Rules bắt khoá này dài đúng 10 ký tự.
+const ORDERS_KEY = 'mon-cua-to';
+const orderRef = (memberId) => ref(db, `orders/${ORDERS_KEY}/${memberId}`);
 
 let me = loadMe();
 let orders = null; // null = chưa tải xong
@@ -1011,7 +1013,7 @@ $('clearBtn').addEventListener('click', () => {
 
 // ----- Dữ liệu realtime của hôm nay -----
 
-onValue(ref(db, `orders/${day}`), (snap) => {
+onValue(ref(db, `orders/${ORDERS_KEY}`), (snap) => {
   orders = snap.val() || {};
   showBanner('');
   if (!dirty) {
