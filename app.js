@@ -22,8 +22,9 @@ const MEMBERS = [
   { id: 'minh-tuan', name: 'Minh Tuấn' },
 ];
 
-const SUBMIT_IDLE = 'Chốt, không đổi nữa!';
-const SUBMIT_DONE = 'Đã chốt!';
+const STATUS_HINT = 'Gõ xong là tự chốt, khỏi bấm gì.';
+const STATUS_DONE = 'Đã chốt!';
+const AUTOSAVE_MS = 600;
 const STORAGE_KEY = 'chon-nuoc-me';
 const WEEKDAYS = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
 
@@ -58,7 +59,9 @@ const orderRef = (memberId) => ref(db, `orders/${day}/${memberId}`);
 
 let me = loadMe();
 let orders = null; // null = chưa tải xong
-let dirty = false;
+let dirty = false; // có chữ vừa gõ chưa lưu xong
+let editVersion = 0;
+let saveTimer = null;
 
 function showBanner(text) {
   $('banner').textContent = text;
@@ -67,13 +70,45 @@ function showBanner(text) {
 
 function fillMyInputs() {
   const choices = (orders && me && orders[me]?.choices) || [];
-  inputs.forEach((input, i) => { input.value = choices[i] ?? ''; });
+  inputs.forEach((input, i) => {
+    const saved = choices[i] ?? '';
+    // So sánh sau trim để không ăn mất dấu cách của chữ đang gõ dở.
+    if (input.value.trim() !== saved) input.value = saved;
+  });
   dirty = false;
 }
 
-function setSubmitted() {
-  const saved = Boolean(me && orders?.[me]);
-  $('submit').textContent = saved && !dirty ? SUBMIT_DONE : SUBMIT_IDLE;
+function syncStatus() {
+  $('status').textContent = me && orders?.[me] ? STATUS_DONE : STATUS_HINT;
+}
+
+async function saveNow() {
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  if (!dirty || !me) return;
+
+  const version = editVersion;
+  const choices = inputs.map((input) => input.value.trim());
+  const saved = orders?.[me]?.choices || [];
+  if (choices.every((c, i) => c === (saved[i] ?? ''))) {
+    dirty = false;
+    syncStatus();
+    return;
+  }
+
+  const memberRef = orderRef(me);
+  $('status').textContent = 'Đang chốt...';
+  try {
+    if (choices.some(Boolean)) await set(memberRef, { choices, at: serverTimestamp() });
+    else await remove(memberRef);
+    if (version === editVersion) {
+      dirty = false;
+      syncStatus();
+    }
+  } catch (err) {
+    console.error(err);
+    $('status').textContent = 'Chưa lưu được, gõ lại thử nha.';
+  }
 }
 
 function renderOthers() {
@@ -98,12 +133,12 @@ function renderOthers() {
 }
 
 function setMe(id) {
+  if (me !== id) saveNow(); // chữ đang gõ dở thuộc về tên cũ
   me = id;
   saveMe(id);
   $('whoBtn').textContent = `Tớ là: ${MEMBERS.find((m) => m.id === id).name}`;
-  $('status').textContent = '';
   fillMyInputs();
-  setSubmitted();
+  syncStatus();
   renderOthers();
 }
 
@@ -130,44 +165,26 @@ $('menuBtn').addEventListener('click', () => {
   $('menuDlg').showModal();
 });
 
-// Lưu lựa chọn
-inputs.forEach((input) => input.addEventListener('input', () => {
-  dirty = true;
-  $('status').textContent = '';
-  setSubmitted();
-}));
-
-$('form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  if (!me) {
-    $('whoDlg').showModal();
-    return;
-  }
-
-  const choices = inputs.map((input) => input.value.trim());
-  const memberRef = orderRef(me);
-  $('submit').disabled = true;
-  $('submit').textContent = 'Đang chốt...';
-  try {
-    if (choices.some(Boolean)) await set(memberRef, { choices, at: serverTimestamp() });
-    else await remove(memberRef);
-    dirty = false;
-    $('status').textContent = '';
-  } catch (err) {
-    console.error(err);
-    $('status').textContent = 'Chưa lưu được, thử lại nha.';
-  } finally {
-    $('submit').disabled = false;
-    setSubmitted();
-  }
+// Tự lưu khi ngừng gõ, hoặc ngay khi rời ô / rời trang
+inputs.forEach((input) => {
+  input.addEventListener('input', () => {
+    dirty = true;
+    editVersion += 1;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveNow, AUTOSAVE_MS);
+  });
+  input.addEventListener('blur', saveNow);
 });
+window.addEventListener('pagehide', saveNow);
 
 // Dữ liệu realtime của hôm nay
 onValue(ref(db, `orders/${day}`), (snap) => {
   orders = snap.val() || {};
   showBanner('');
-  if (!dirty) fillMyInputs();
-  setSubmitted();
+  if (!dirty) {
+    fillMyInputs();
+    syncStatus();
+  }
   renderOthers();
 }, (err) => {
   console.error(err);
@@ -186,7 +203,8 @@ onValue(ref(db, '.info/connected'), (snap) => {
 
 // Để tab qua đêm thì sang ngày mới tự có danh sách mới.
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && dayKey() !== day && !dirty) location.reload();
+  if (document.hidden) saveNow();
+  else if (dayKey() !== day && !dirty) location.reload();
 });
 
 // Khởi động
