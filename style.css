@@ -406,48 +406,46 @@ section { display: flex; flex-direction: column; gap: 8px; }
 .dlg-menu p { margin: 16px 0 4px; text-align: center; font-weight: 800; }
 
 /* Mèo chó */
-.pet { display: block; width: 100%; height: auto; overflow: visible; }
+.pet { display: block; width: 100%; height: auto; user-select: none; -webkit-user-drag: none; }
 .mirrored { transform: scaleX(-1); }
-.pet-leg, .pet-tail, .pet-paw { transform-box: fill-box; }
-.pet-leg { transform-origin: 50% 0; }
-.pet-tail { transform-origin: 100% 100%; }
-.pet-paw { transform-origin: 0 100%; }
+.pet-swat, .pet-rock { transform-origin: 50% 100%; }
+.pet-wiggle { transform-origin: 50% 70%; }
 
 .hero { position: relative; }
-.hero-pets { position: absolute; top: 26px; right: 0; width: 88px; pointer-events: none; }
-.hero-yarn { position: absolute; top: 24px; right: -8px; width: 20px; }
+.hero-pets { position: absolute; top: 18px; right: 18px; width: 92px; pointer-events: none; }
+.hero-yarn { position: absolute; top: 2px; right: -22px; width: 24px; }
 
-.gap-pet { position: absolute; left: 100%; bottom: 0; width: 54px; pointer-events: none; }
-.gap-pet .pet-paw { display: none; }
+.gap-pet { position: absolute; left: calc(100% + 3px); bottom: 2px; width: 54px; pointer-events: none; }
 
 .stage {
   position: relative;
-  height: 186px;
+  height: 204px;
   margin-top: 8px;
   overflow: hidden;
   border-bottom: 3px dashed var(--ink);
   pointer-events: none;
 }
-.stage-volley { position: absolute; inset: 8px 0 auto; height: 96px; }
-.stage-run { position: absolute; inset: auto 0 2px; height: 66px; }
+.stage-volley { position: absolute; inset: 18px 0 auto; height: 112px; }
+.stage-run { position: absolute; inset: auto 0 2px; height: 72px; }
 
-.volley-side { position: absolute; bottom: 0; width: 104px; }
-.volley-side.left { left: 4%; }
-.volley-side.right { right: 4%; }
-.volley-x { position: absolute; inset: auto 0 24px; transform: translateX(32%); }
-.volley-y { width: 26px; }
+.volley-side { position: absolute; bottom: 0; width: 100px; }
+.volley-side.left { left: 3%; }
+.volley-side.right { right: 3%; }
+.volley-kitten { position: absolute; left: 50%; bottom: 0; width: 80px; margin-left: -40px; }
+.volley-x { position: absolute; inset: auto 0 64px; transform: translateX(calc(3% + 88px)); }
+.volley-y { width: 28px; }
 
 .runner { position: absolute; inset: 0; }
-.troupe { position: absolute; left: 0; bottom: 0; display: flex; align-items: flex-end; gap: 10px; width: 244px; }
-.troupe-dog, .troupe-cat { width: 92px; flex: none; }
+.troupe { position: absolute; left: 0; bottom: 0; display: flex; align-items: flex-end; gap: 12px; width: 258px; }
+.troupe-dog, .troupe-cat { width: 104px; flex: none; }
 .troupe-yarn { width: 26px; flex: none; }
 
 .pets-wide { display: none; }
 @media (min-width: 1100px) {
   .pets-wide { position: fixed; inset: 0; z-index: 0; display: block; overflow: hidden; pointer-events: none; }
   .wide-volley { position: absolute; left: 24px; bottom: 96px; width: calc(50vw - 260px); height: 110px; }
-  .wide-cat { position: absolute; right: calc(25vw - 170px); top: 34vh; width: 170px; }
-  .wide-run { position: absolute; inset: auto 0 12px; height: 66px; }
+  .wide-kitten { position: absolute; right: calc(25vw - 200px); top: 30vh; width: 180px; }
+  .wide-run { position: absolute; inset: auto 0 12px; height: 72px; }
 }
 
 @media (max-width: 349px) {
@@ -455,13 +453,13 @@ section { display: flex; flex-direction: column; gap: 8px; }
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .pet-run { animation: pet-bob .32s ease-in-out infinite alternate; }
-  .pet-leg.a { animation: pet-leg-a .32s ease-in-out infinite alternate; }
-  .pet-leg.b { animation: pet-leg-b .32s ease-in-out infinite alternate; }
-  .pet-tail { animation: pet-tail .7s ease-in-out infinite alternate; }
-  .pet-paw { animation: pet-swat 2.4s linear infinite; }
-  .volley-side.right .pet-paw { animation-delay: 1.2s; }
-  .hero-pets .pet-paw { animation-duration: 1.6s; }
+  .pet-run { animation: pet-gallop .3s ease-in-out infinite alternate; }
+  .pet-run-alt { animation-delay: -.15s; }
+  .pet-swat { animation: pet-swat 2.4s linear infinite; }
+  .volley-side.right .pet-swat { animation-delay: 1.2s; }
+  .hero-pets .pet-swat { animation-duration: 1.6s; }
+  .pet-rock { animation: pet-rock 1.1s ease-in-out infinite alternate; }
+  .pet-wiggle { animation: pet-wiggle .55s ease-in-out infinite alternate; }
   .hero-yarn { animation: pet-hop .8s ease-in-out infinite alternate; }
   .pet-yarn { animation: pet-roll 1.2s linear infinite; }
   .volley-x { animation: pet-fly 1.2s linear infinite alternate; }
@@ -470,14 +468,13 @@ section { display: flex; flex-direction: column; gap: 8px; }
   .troupe { animation: pet-flip 12s step-end infinite; }
 }
 
-@keyframes pet-bob { to { transform: translateY(-3px); } }
-@keyframes pet-leg-a { from { transform: rotate(-30deg); } to { transform: rotate(30deg); } }
-@keyframes pet-leg-b { from { transform: rotate(30deg); } to { transform: rotate(-30deg); } }
-@keyframes pet-tail { from { transform: rotate(-9deg); } to { transform: rotate(14deg); } }
-@keyframes pet-swat { 0% { transform: rotate(-42deg); } 14% { transform: rotate(16deg); } 34%, 100% { transform: rotate(0); } }
-@keyframes pet-hop { to { transform: translateY(-16px); } }
+@keyframes pet-gallop { from { transform: translateY(0) rotate(-6deg); } to { transform: translateY(-9px) rotate(5deg); } }
+@keyframes pet-swat { 0% { transform: translateY(-5px) rotate(9deg); } 14% { transform: rotate(-4deg); } 34%, 100% { transform: rotate(0); } }
+@keyframes pet-rock { from { transform: rotate(-4deg); } to { transform: rotate(4deg); } }
+@keyframes pet-wiggle { from { transform: rotate(-8deg); } to { transform: rotate(8deg); } }
+@keyframes pet-hop { to { transform: translateY(-14px); } }
 @keyframes pet-roll { to { transform: rotate(360deg); } }
-@keyframes pet-fly { from { transform: translateX(26%); } to { transform: translateX(65%); } }
-@keyframes pet-arc { to { transform: translateY(-46px); } }
-@keyframes pet-cross { 0%, 100% { transform: translateX(-260px); } 50% { transform: translateX(100%); } }
+@keyframes pet-fly { from { transform: translateX(calc(3% + 88px)); } to { transform: translateX(calc(97% - 116px)); } }
+@keyframes pet-arc { to { transform: translateY(-34px); } }
+@keyframes pet-cross { 0%, 100% { transform: translateX(-280px); } 50% { transform: translateX(100%); } }
 @keyframes pet-flip { 0% { transform: scaleX(1); } 50% { transform: scaleX(-1); } }
