@@ -16,11 +16,50 @@
               "sugar": { ".validate": "newData.val() === 100 || newData.val() === 70 || newData.val() === 50 || newData.val() === 30 || newData.val() === 0" },
               "ice": { ".validate": "newData.val() === 100 || newData.val() === 70 || newData.val() === 50 || newData.val() === 30 || newData.val() === 0" },
               "note": { ".validate": "newData.isString() && newData.val().length <= 100" },
+              "toppings": {
+                "$t": { ".validate": "newData.isString() && newData.val().length <= 40" }
+              },
               "$other": { ".validate": false }
             }
           },
           "at": { ".validate": "newData.isNumber()" },
           "$other": { ".validate": false }
+        }
+      }
+    },
+    "extras": {
+      "$day": {
+        ".read": "$day.length === 10",
+        "payer": {
+          ".write": "$day.length === 10",
+          ".validate": "newData.hasChildren(['member', 'account'])",
+          "member": { ".validate": "newData.val() === 'mai-anh' || newData.val() === 'duong-thuy' || newData.val() === 'le-hanh' || newData.val() === 'duy-cuyt' || newData.val() === 'minh-tuan'" },
+          "account": { ".validate": "newData.isString() && newData.val().length <= 20" },
+          "$other": { ".validate": false }
+        },
+        "seeds": {
+          ".write": "$day.length === 10",
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 30 && newData.val() % 1 === 0"
+        },
+        "people": {
+          "$member": {
+            ".write": "$day.length === 10 && ($member === 'mai-anh' || $member === 'duong-thuy' || $member === 'le-hanh' || $member === 'duy-cuyt' || $member === 'minh-tuan')",
+            "absent": { ".validate": "newData.isBoolean()" },
+            "reason": { ".validate": "newData.isString() && newData.val().length <= 100" },
+            "actual": { ".validate": "newData.val() === -1 || newData.val() === 0 || newData.val() === 1 || newData.val() === 2 || newData.val() === 3 || newData.val() === 4" },
+            "override": {
+              ".validate": "newData.hasChild('name')",
+              "name": { ".validate": "newData.isString() && newData.val().length <= 60" },
+              "size": { ".validate": "newData.val() === 'M' || newData.val() === 'L'" },
+              "toppings": {
+                "$t": { ".validate": "newData.isString() && newData.val().length <= 40" }
+              },
+              "$other": { ".validate": false }
+            },
+            "manualPrice": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000 && newData.val() % 1 === 0" },
+            "treatedBy": { ".validate": "newData.val() === 'mai-anh' || newData.val() === 'duong-thuy' || newData.val() === 'le-hanh' || newData.val() === 'duy-cuyt' || newData.val() === 'minh-tuan'" },
+            "$other": { ".validate": false }
+          }
         }
       }
     }

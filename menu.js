@@ -1,4 +1,16 @@
 // Giá tính bằng nghìn đồng. Món có size dùng m và l, món một giá dùng p.
+export const SUNFLOWER_K = 15;
+
+export const TOPPINGS = [
+  { name: 'Trân Châu Trắng', p: 5 },
+  { name: 'Trân Châu Đen', p: 5 },
+  { name: 'Trân Châu Olong', p: 5 },
+  { name: 'Nha Đam', p: 5 },
+  { name: 'Hạt Nổ Củ Năng', p: 7 },
+  { name: 'Hạt Nổ Yến Mạch', p: 7 },
+  { name: 'Hạt Nổ Dừa Ròn', p: 7 },
+];
+
 export const MENU = [
   { group: 'Bestseller', items: [
     { name: 'Ôlong Cốm Dẻo', p: 45 },

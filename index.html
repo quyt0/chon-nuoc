@@ -39,7 +39,12 @@
     </button>
   </div>
 
-  <div class="tiers">
+  <div class="absent-box">
+    <label class="absent-row"><input type="checkbox" id="absentBox"> Hôm nay tớ không đi</label>
+    <input id="absentReason" class="opt-note" maxlength="100" placeholder="Lý do (bận, ốm, lười...)" aria-label="Lý do không đi" autocomplete="off" hidden>
+  </div>
+
+  <div class="tiers" id="orderArea">
     <div class="tier tier-1">
       <span class="tier-label">Chân ái của tớ:</span>
       <button type="button" class="tier-pick is-empty">Chọn món...</button>
@@ -74,6 +79,41 @@
     <h2>Mấy đứa kia viết gì:</h2>
     <div class="others" id="others"></div>
   </section>
+
+  <section>
+    <h2>Tiền nong:</h2>
+
+    <div class="row payer-box">
+      <p class="row-name" id="payerText"></p>
+      <select class="opt" id="payerAccount" aria-label="Số tài khoản nhận tiền" hidden></select>
+      <button type="button" class="invite" id="payerBtn"></button>
+    </div>
+
+    <div class="row seeds-box">
+      <div class="seeds-head">
+        <span class="row-name">Hướng dương</span>
+        <div class="stepper">
+          <button type="button" class="step" id="seedsMinus" aria-label="Bớt một gói">−</button>
+          <span class="row-name" id="seedsCount" aria-live="polite">0 gói</span>
+          <button type="button" class="step" id="seedsPlus" aria-label="Thêm một gói">+</button>
+        </div>
+      </div>
+      <div class="row-picks" id="seedsInfo"></div>
+    </div>
+
+    <div class="pay-box" id="payBox" hidden>
+      <p class="pay-title" id="payTitle"></p>
+      <ul class="pay-lines" id="payLines"></ul>
+      <div id="qrWrap" hidden>
+        <img id="qrImg" alt="Mã QR chuyển khoản" width="300" height="360">
+        <p class="row-picks" id="qrInfo"></p>
+      </div>
+    </div>
+
+    <h3 class="bill-title">Món thật mỗi đứa uống:</h3>
+    <p class="row-picks" id="billEmpty">Chưa có ai chọn món.</p>
+    <div class="others" id="billRows"></div>
+  </section>
 </main>
 
 <dialog id="whoDlg" class="dlg">
@@ -96,6 +136,14 @@
   <input id="pickSearch" class="pick-search" maxlength="60" placeholder="Tìm hoặc gõ tên món" aria-label="Tìm món" autocomplete="off">
   <button type="button" class="clear" id="pickClear" hidden>Bỏ món này</button>
   <div class="pick-list" id="pickList"></div>
+</dialog>
+
+<dialog id="toppingDlg" class="dlg dlg-pick">
+  <div class="pick-head">
+    <h2>Thêm topping</h2>
+    <button type="button" class="pill" id="toppingClose">Xong</button>
+  </div>
+  <div class="pick-list" id="toppingList"></div>
 </dialog>
 
 <script type="module" src="app.js"></script>

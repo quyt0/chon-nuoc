@@ -1,8 +1,10 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js';
 import {
-  getDatabase, ref, onValue, set, remove, serverTimestamp,
+  getDatabase, ref, onValue, set, remove, serverTimestamp, runTransaction,
 } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-database.js';
-import { MENU } from './menu.js';
+import { MENU, TOPPINGS, SUNFLOWER_K } from './menu.js';
+import { BANKS, ACCOUNTS } from './accounts.js';
+import { computeBill, drinkK, toppingsK, formatK, fold, OVERRIDE_INDEX } from './bill.js';
 
 // Config web của Firebase vốn công khai; quyền ghi do database.rules.json quyết định.
 const firebaseConfig = {
@@ -22,6 +24,7 @@ const MEMBERS = [
   { id: 'duy-cuyt', name: 'Duy Cuýt' },
   { id: 'minh-tuan', name: 'Minh Tuấn' },
 ];
+const memberName = (id) => MEMBERS.find((m) => m.id === id)?.name ?? '';
 
 const STATUS_HINT = 'Chọn xong là tự chốt, khỏi bấm gì.';
 const STATUS_DONE = 'Đã chốt!';
@@ -30,6 +33,7 @@ const STORAGE_KEY = 'chon-nuoc-me';
 const WEEKDAYS = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
 const LEVELS = [100, 70, 50, 30, 0];
 const DEFAULT_LEVEL = 100;
+const MAX_SEEDS = 30;
 
 const $ = (id) => document.getElementById(id);
 const pad = (n) => String(n).padStart(2, '0');
@@ -55,13 +59,13 @@ function saveMe(id) {
   }
 }
 
-const blank = () => ({ name: '', size: '', sugar: DEFAULT_LEVEL, ice: DEFAULT_LEVEL, note: '' });
+const blank = () => ({ name: '', size: '', sugar: DEFAULT_LEVEL, ice: DEFAULT_LEVEL, note: '', toppings: [] });
 
 // Dữ liệu cũ lưu mỗi món là một chuỗi; ô trống là ''.
 function normalize(stored) {
   if (!stored) return blank();
   if (typeof stored === 'string') return { ...blank(), name: stored };
-  return { ...blank(), ...stored };
+  return { ...blank(), ...stored, toppings: [...(stored.toppings || [])] };
 }
 
 function toStored(choice) {
@@ -71,16 +75,18 @@ function toStored(choice) {
   if (choice.size) stored.size = choice.size;
   const note = choice.note.trim();
   if (note) stored.note = note;
+  if (choice.toppings.length) stored.toppings = choice.toppings;
   return stored;
 }
 
-const choiceKey = (c) => [c.name.trim(), c.size, c.sugar, c.ice, c.note.trim()].join('|');
+const choiceKey = (c) => [c.name.trim(), c.size, c.sugar, c.ice, c.note.trim(), c.toppings.join(',')].join('|');
 
 function describe(c) {
   const parts = [c.name];
   if (c.size) parts.push(`Size ${c.size}`);
   if (c.sugar !== DEFAULT_LEVEL) parts.push(`Đường ${c.sugar}%`);
   if (c.ice !== DEFAULT_LEVEL) parts.push(`Đá ${c.ice}%`);
+  c.toppings.forEach((t) => parts.push(`+ ${t}`));
   if (c.note) parts.push(c.note);
   return parts.join(' · ');
 }
@@ -91,16 +97,42 @@ const orderRef = (memberId) => ref(db, `orders/${day}/${memberId}`);
 
 let me = loadMe();
 let orders = null; // null = chưa tải xong
+let extras = {}; // người trả, hướng dương, không đi, món thật, mời
 let draft = Array.from({ length: 4 }, blank);
-let dirty = false; // có thay đổi chưa lưu xong
+let dirty = false; // có thay đổi món chưa lưu xong
 let editVersion = 0;
 let saveTimer = null;
+let reasonTimer = null;
 let pickingTier = 0;
+let overrideFor = null; // đang chọn "Món khác" cho ai; null = chọn cho ô của tớ
+let bill = computeBill([], 0);
 
 function showBanner(text) {
   $('banner').textContent = text;
   $('banner').hidden = !text;
 }
+
+const person = (id) => extras.people?.[id] ?? {};
+
+async function writeExtra(path, value) {
+  try {
+    await set(ref(db, `extras/${day}/${path}`), value);
+  } catch (err) {
+    console.error(err);
+    showBanner('Chưa lưu được, thử lại nha.');
+  }
+}
+
+const setPerson = (id, field, value) => writeExtra(`people/${id}/${field}`, value);
+
+function validPayer() {
+  const p = extras.payer;
+  if (!p || !ACCOUNTS[p.member] || person(p.member).absent) return null;
+  const list = ACCOUNTS[p.member].list;
+  return { member: p.member, account: list.find((a) => a.no === p.account) ?? list[0] };
+}
+
+// ----- Món của tớ -----
 
 function makeSelect(label, options, onChange) {
   const select = document.createElement('select');
@@ -132,10 +164,19 @@ const controls = [...document.querySelectorAll('.tier')].map((tier, i) => {
   const sugar = makeSelect('Đường', levelOptions('Đường'), (v) => updateChoice(i, { sugar: Number(v) }));
   const ice = makeSelect('Đá', levelOptions('Đá'), (v) => updateChoice(i, { ice: Number(v) }));
 
+  const topping = document.createElement('button');
+  topping.type = 'button';
+  topping.className = 'opt opt-topping';
+  topping.addEventListener('click', () => openToppings(draft[i].toppings, (next) => {
+    updateChoice(i, { toppings: next });
+    renderTier(i);
+    renderAll();
+  }));
+
   const note = document.createElement('input');
   note.className = 'opt-note';
   note.maxLength = 100;
-  note.placeholder = 'Ghi chú (topping, ít ngọt...)';
+  note.placeholder = 'Ghi chú (ít ngọt, không kem...)';
   note.setAttribute('aria-label', 'Ghi chú');
   note.addEventListener('input', () => {
     draft[i].note = note.value;
@@ -147,10 +188,10 @@ const controls = [...document.querySelectorAll('.tier')].map((tier, i) => {
 
   const opts = document.createElement('div');
   opts.className = 'opts';
-  opts.append(size, sugar, ice, note);
+  opts.append(size, sugar, ice, topping, note);
   tier.append(opts);
 
-  return { pick, opts, size, sugar, ice, note };
+  return { pick, opts, size, sugar, ice, topping, note };
 });
 
 function renderTier(i) {
@@ -163,6 +204,7 @@ function renderTier(i) {
   ui.size.value = c.size || 'M';
   ui.sugar.value = String(c.sugar);
   ui.ice.value = String(c.ice);
+  ui.topping.textContent = c.toppings.length ? `+ ${c.toppings.join(', ')}` : 'Thêm topping';
   // So sánh sau trim để không ăn mất dấu cách của chữ đang gõ dở.
   if (ui.note.value.trim() !== c.note) ui.note.value = c.note;
 }
@@ -207,46 +249,372 @@ async function saveNow() {
   }
 }
 
+// ----- Mấy đứa kia -----
+
 function renderOthers() {
   const rows = MEMBERS.filter((m) => m.id !== me).map((m) => {
     const picks = (orders?.[m.id]?.choices || []).map(normalize).filter((c) => c.name);
+    const absent = person(m.id).absent;
     const row = document.createElement('div');
-    row.className = picks.length ? 'row' : 'row empty';
+    row.className = picks.length && !absent ? 'row' : 'row empty';
 
     const name = document.createElement('div');
     name.className = 'row-name';
     name.textContent = m.name;
     row.append(name);
 
-    if (picks.length) {
-      picks.forEach((c, i) => {
-        const line = document.createElement('div');
-        line.className = 'row-picks';
-        line.textContent = `${i + 1}. ${describe(c)}`;
-        row.append(line);
-      });
-    } else {
+    const addLine = (text) => {
       const line = document.createElement('div');
       line.className = 'row-picks';
-      line.textContent = orders === null ? '...' : 'Còn đang phân vân giữa nhiều mối…';
+      line.textContent = text;
       row.append(line);
+    };
+
+    if (absent) {
+      const reason = person(m.id).reason;
+      addLine(reason ? `Hôm nay không đi: ${reason}` : 'Hôm nay không đi.');
+    } else if (picks.length) {
+      picks.forEach((c, i) => addLine(`${i + 1}. ${describe(c)}`));
+    } else {
+      addLine(orders === null ? '...' : 'Còn đang phân vân giữa nhiều mối…');
     }
     return row;
   });
   $('others').replaceChildren(...rows);
 }
 
+// ----- Không đi -----
+
+function renderAbsent() {
+  const absent = Boolean(me && person(me).absent);
+  $('absentBox').checked = absent;
+  $('absentReason').hidden = !absent;
+  $('orderArea').hidden = absent;
+  if (document.activeElement !== $('absentReason')) {
+    $('absentReason').value = me ? person(me).reason ?? '' : '';
+  }
+}
+
+function saveReason() {
+  clearTimeout(reasonTimer);
+  reasonTimer = null;
+  if (!me || !person(me).absent) return;
+  const reason = $('absentReason').value.trim();
+  if (reason !== (person(me).reason ?? '')) setPerson(me, 'reason', reason || null);
+}
+
+$('absentBox').addEventListener('change', () => {
+  if (!me) return;
+  if ($('absentBox').checked) {
+    saveNow();
+    setPerson(me, 'absent', true);
+    if (extras.payer?.member === me) writeExtra('payer', null);
+  } else {
+    writeExtra(`people/${me}/absent`, null);
+    setPerson(me, 'reason', null);
+  }
+});
+
+$('absentReason').addEventListener('input', () => {
+  clearTimeout(reasonTimer);
+  reasonTimer = setTimeout(saveReason, AUTOSAVE_MS);
+});
+$('absentReason').addEventListener('blur', saveReason);
+
+// ----- Người trả -----
+
+function renderPayer() {
+  const payer = validPayer();
+  const absent = Boolean(me && person(me).absent);
+  const isMe = payer?.member === me;
+
+  if (!payer) $('payerText').textContent = 'Chưa ai nhận trả.';
+  else if (isMe) $('payerText').textContent = 'Hôm nay tớ trả nha.';
+  else $('payerText').textContent = `Hôm nay ${memberName(payer.member)} trả.`;
+
+  $('payerBtn').hidden = absent || !me;
+  if (!payer) $('payerBtn').textContent = 'Hôm nay tớ trả';
+  else $('payerBtn').textContent = isMe ? 'Thôi, tớ không trả nữa' : 'Giành trả';
+
+  const select = $('payerAccount');
+  select.hidden = !isMe;
+  if (isMe && document.activeElement !== select) {
+    const key = `${me}`;
+    if (select.dataset.owner !== key) {
+      select.replaceChildren(...ACCOUNTS[me].list.map((a) => new Option(`${BANKS[a.bank].name} · ${a.no}`, a.no)));
+      select.dataset.owner = key;
+    }
+    select.value = payer.account.no;
+  }
+}
+
+$('payerBtn').addEventListener('click', () => {
+  if (!me) return;
+  const payer = validPayer();
+  if (payer?.member === me) {
+    writeExtra('payer', null);
+    return;
+  }
+  if (payer && !window.confirm(`Giành trả với ${memberName(payer.member)} thật à?`)) return;
+  writeExtra('payer', { member: me, account: ACCOUNTS[me].list[0].no });
+});
+
+$('payerAccount').addEventListener('change', () => writeExtra('payer/account', $('payerAccount').value));
+
+// ----- Hướng dương -----
+
+function renderSeeds() {
+  const seeds = extras.seeds ?? 0;
+  $('seedsCount').textContent = `${seeds} gói`;
+  $('seedsMinus').disabled = seeds <= 0;
+  $('seedsPlus').disabled = seeds >= MAX_SEEDS;
+  if (!seeds) $('seedsInfo').textContent = `${formatK(SUNFLOWER_K)} một gói.`;
+  else if (!bill.goingCount) $('seedsInfo').textContent = 'Chưa có ai đi để chia.';
+  else $('seedsInfo').textContent = `${formatK(seeds * SUNFLOWER_K)} chia ${bill.goingCount} người: ${formatK(bill.seedK)} mỗi người.`;
+}
+
+// Transaction để hai người bấm cùng lúc vẫn cộng đủ.
+async function bumpSeeds(delta) {
+  try {
+    await runTransaction(ref(db, `extras/${day}/seeds`), (n) => Math.min(MAX_SEEDS, Math.max(0, (n ?? 0) + delta)));
+  } catch (err) {
+    console.error(err);
+    showBanner('Chưa lưu được, thử lại nha.');
+  }
+}
+
+$('seedsMinus').addEventListener('click', () => bumpSeeds(-1));
+$('seedsPlus').addEventListener('click', () => bumpSeeds(1));
+
+// ----- Tiền của tớ + QR -----
+
+function qrUrl(account, holder, amountK, payerName) {
+  const now = new Date();
+  const info = `nuoc ${pad(now.getDate())}${pad(now.getMonth() + 1)} ${fold(payerName)}`;
+  const name = fold(holder).toUpperCase();
+  return `https://img.vietqr.io/image/${BANKS[account.bank].bin}-${account.no}-compact2.png`
+    + `?amount=${amountK * 1000}&addInfo=${encodeURIComponent(info)}&accountName=${encodeURIComponent(name)}`;
+}
+
+function billLines(r) {
+  const lines = [];
+  if (r.choice) {
+    const label = `${r.choice.name}${r.choice.size ? ` ${r.choice.size}` : ''}`;
+    lines.push(`${label}: ${r.drinkK === null ? 'chưa có giá' : formatK(r.drinkK)}`);
+  } else if (r.going) {
+    lines.push('Không uống gì');
+  }
+  if (r.toppingK) lines.push(`Topping: ${formatK(r.toppingK)}`);
+  if (r.seedK) lines.push(`Hướng dương: ${formatK(r.seedK)}`);
+  r.invited.forEach((id) => {
+    const guest = bill.rows.get(id);
+    lines.push(`Mời ${memberName(id)}: ${guest.priceMissing ? 'chưa có giá' : formatK(guest.ownK)}`);
+  });
+  return lines;
+}
+
+function setQr(url, infoText) {
+  const img = $('qrImg');
+  $('qrWrap').hidden = !url;
+  if (!url) return;
+  if (img.getAttribute('src') !== url) img.src = url;
+  $('qrInfo').textContent = infoText;
+}
+
+function renderMyPay() {
+  const r = me ? bill.rows.get(me) : null;
+  const show = Boolean(r && !person(me).absent && (r.going || r.invited.length || validPayer()?.member === me));
+  $('payBox').hidden = !show;
+  setQr(null);
+  if (!show) return;
+
+  const payer = validPayer();
+  const lines = r.rootId !== me ? [] : billLines(r);
+  $('payLines').replaceChildren(...lines.map((text) => {
+    const li = document.createElement('li');
+    li.textContent = text;
+    return li;
+  }));
+
+  if (r.rootId !== me) {
+    $('payTitle').textContent = `${memberName(r.rootId)} mời cậu rồi, khỏi trả.`;
+  } else if (payer?.member === me) {
+    const incoming = [...bill.rows.values()].filter((x) => x.going && x.rootId === x.id && x.id !== me);
+    const missing = incoming.some((x) => x.totalMissing);
+    const sum = incoming.reduce((s, x) => s + x.totalK, 0);
+    $('payTitle').textContent = missing
+      ? 'Còn món chưa có giá, nhập giá ở bảng dưới đã.'
+      : `Cậu ứng tiền, mấy đứa kia sẽ chuyển lại ${formatK(sum)}.`;
+  } else if (r.totalMissing) {
+    $('payTitle').textContent = 'Còn món chưa có giá, nhập giá ở bảng dưới đã.';
+  } else if (!payer) {
+    $('payTitle').textContent = `Cậu sẽ trả ${formatK(r.totalK)}. Chờ có người nhận trả nha.`;
+  } else if (!r.totalK) {
+    $('payTitle').textContent = 'Không phải trả đồng nào.';
+  } else {
+    const holder = ACCOUNTS[payer.member].holder;
+    $('payTitle').textContent = `Cậu chuyển cho ${memberName(payer.member)}: ${formatK(r.totalK)}`;
+    setQr(
+      qrUrl(payer.account, holder, r.totalK, memberName(me)),
+      `${BANKS[payer.account.bank].name} · ${payer.account.no} · ${holder}`,
+    );
+  }
+}
+
+// ----- Bảng tiền cả nhóm -----
+
+function reaches(from, target) {
+  const seen = new Set();
+  let current = from;
+  while (current && !seen.has(current)) {
+    if (current === target) return true;
+    seen.add(current);
+    current = bill.rows.get(current)?.treatedBy;
+  }
+  return false;
+}
+
+function drinkOptionLabel(c, prefix) {
+  const k = drinkK(c);
+  const price = k === null ? 'tự gõ' : `${k + toppingsK(c)}k`;
+  return `${prefix}${c.name}${c.size ? ` ${c.size}` : ''} (${price})`;
+}
+
+function saveOverride(id, override) {
+  const stored = { name: override.name };
+  if (override.size) stored.size = override.size;
+  if (override.toppings?.length) stored.toppings = override.toppings;
+  setPerson(id, 'override', stored);
+}
+
+function billRow(r) {
+  const row = document.createElement('div');
+  row.className = 'row bill-row';
+
+  const head = document.createElement('div');
+  head.className = 'bill-head';
+  const name = document.createElement('span');
+  name.className = 'row-name';
+  name.textContent = memberName(r.id);
+  const amount = document.createElement('span');
+  amount.className = 'row-name';
+  if (r.rootId !== r.id) amount.textContent = `${memberName(r.rootId)} mời`;
+  else amount.textContent = r.totalMissing ? 'Chưa có giá' : formatK(r.totalK);
+  head.append(name, amount);
+  row.append(head);
+
+  const choices = (orders?.[r.id]?.choices || []).map(normalize);
+  const select = document.createElement('select');
+  select.className = 'opt bill-select';
+  select.setAttribute('aria-label', `Món thật của ${memberName(r.id)}`);
+  choices.forEach((c, i) => { if (c.name) select.add(new Option(drinkOptionLabel(c, `${i + 1}. `), String(i))); });
+  const override = person(r.id).override ? normalize(person(r.id).override) : null;
+  if (override) select.add(new Option(drinkOptionLabel(override, 'Khác: '), String(OVERRIDE_INDEX)));
+  select.add(new Option('Không uống gì', '-1'));
+  select.add(new Option('Món khác...', 'other'));
+  select.value = String(r.actual);
+  select.addEventListener('change', () => {
+    if (select.value === 'other') {
+      select.value = String(r.actual);
+      openOverridePicker(r.id);
+    } else {
+      setPerson(r.id, 'actual', Number(select.value));
+    }
+  });
+  row.append(select);
+
+  if (r.actual === OVERRIDE_INDEX) {
+    const extras2 = document.createElement('div');
+    extras2.className = 'opts';
+    if (r.choice.size) {
+      extras2.append(makeSelect(`Size món của ${memberName(r.id)}`, [['M', 'Size M'], ['L', 'Size L']], (v) => saveOverride(r.id, { ...r.choice, size: v })));
+      extras2.lastChild.value = r.choice.size;
+    }
+    const topping = document.createElement('button');
+    topping.type = 'button';
+    topping.className = 'opt opt-topping';
+    topping.textContent = r.choice.toppings.length ? `+ ${r.choice.toppings.join(', ')}` : 'Thêm topping';
+    topping.addEventListener('click', () => openToppings(r.choice.toppings, (next) => {
+      saveOverride(r.id, { ...normalize(person(r.id).override), toppings: next });
+    }));
+    extras2.append(topping);
+    row.append(extras2);
+  }
+
+  if (r.needsManual) {
+    const price = document.createElement('input');
+    price.className = 'opt-note';
+    price.inputMode = 'numeric';
+    price.placeholder = 'Giá món tự gõ (nghìn đồng), ví dụ 35';
+    price.setAttribute('aria-label', `Giá món của ${memberName(r.id)}, tính bằng nghìn đồng`);
+    if (r.manualPrice !== undefined) price.value = String(r.manualPrice);
+    price.addEventListener('change', () => {
+      const n = Number.parseInt(price.value, 10);
+      setPerson(r.id, 'manualPrice', Number.isInteger(n) && n >= 0 && n <= 1000 ? n : null);
+    });
+    row.append(price);
+  }
+
+  const lines = billLines(r);
+  if (lines.length && r.rootId === r.id) {
+    const detail = document.createElement('div');
+    detail.className = 'row-picks';
+    detail.textContent = lines.join(' · ');
+    row.append(detail);
+  }
+
+  if (me && r.id !== me && !person(me).absent && bill.rows.get(me)?.going) {
+    const mine = r.treatedBy === me;
+    if (mine || (!r.treatedBy && !reaches(me, r.id))) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'invite';
+      btn.textContent = mine ? 'Bỏ mời' : 'Tớ mời bạn này';
+      btn.addEventListener('click', () => setPerson(r.id, 'treatedBy', mine ? null : me));
+      row.append(btn);
+    }
+  }
+  return row;
+}
+
+function renderBillRows() {
+  const active = document.activeElement;
+  if (active && $('billRows').contains(active) && active.tagName !== 'BUTTON') return;
+  const rows = MEMBERS.map((m) => bill.rows.get(m.id)).filter((r) => r?.going);
+  $('billRows').replaceChildren(...rows.map(billRow));
+  $('billEmpty').hidden = rows.length > 0;
+}
+
+$('billRows').addEventListener('focusout', () => setTimeout(renderBillRows, 0));
+
+function renderAll() {
+  bill = computeBill(MEMBERS.map((m) => ({
+    id: m.id,
+    choices: (orders?.[m.id]?.choices || []).map(normalize),
+    ...person(m.id),
+    override: person(m.id).override ? normalize(person(m.id).override) : undefined,
+  })), extras.seeds ?? 0);
+  renderOthers();
+  renderAbsent();
+  renderPayer();
+  renderSeeds();
+  renderMyPay();
+  renderBillRows();
+}
+
 function setMe(id) {
   if (me !== id) saveNow(); // thay đổi đang dở thuộc về tên cũ
   me = id;
   saveMe(id);
-  $('whoBtn').textContent = `Tớ là: ${MEMBERS.find((m) => m.id === id).name}`;
+  $('whoBtn').textContent = `Tớ là: ${memberName(id)}`;
+  $('payerAccount').dataset.owner = '';
   loadDraft();
   syncStatus();
-  renderOthers();
+  renderAll();
 }
 
-// Chọn tên
+// ----- Hộp thoại -----
+
 $('whoList').replaceChildren(...MEMBERS.map((m) => {
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -261,14 +629,16 @@ $('whoList').replaceChildren(...MEMBERS.map((m) => {
 $('whoBtn').addEventListener('click', () => $('whoDlg').showModal());
 $('whoDlg').addEventListener('cancel', (e) => { if (!me) e.preventDefault(); });
 
-// Ảnh menu
 $('menuBtn').addEventListener('click', () => $('menuDlg').showModal());
 
-// Chọn món
-const fold = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd');
-
 function choose(name, hasSizes) {
-  draft[pickingTier] = { ...blank(), name, size: hasSizes ? 'M' : '' };
+  if (overrideFor) {
+    saveOverride(overrideFor, { name, size: hasSizes ? 'M' : '' });
+    setPerson(overrideFor, 'actual', OVERRIDE_INDEX);
+    $('pickDlg').close();
+    return;
+  }
+  draft[pickingTier] ={ ...blank(), name, size: hasSizes ? 'M' : '' };
   renderTier(pickingTier);
   markDirty();
   saveNow();
@@ -317,12 +687,22 @@ function renderPickList() {
   $('pickList').replaceChildren(...nodes);
 }
 
-function openPicker(i) {
-  pickingTier = i;
+function showPicker(canClear) {
   $('pickSearch').value = '';
-  $('pickClear').hidden = !draft[i].name;
+  $('pickClear').hidden = !canClear;
   renderPickList();
   $('pickDlg').showModal();
+}
+
+function openPicker(i) {
+  pickingTier = i;
+  overrideFor = null;
+  showPicker(Boolean(draft[i].name));
+}
+
+function openOverridePicker(id) {
+  overrideFor = id;
+  showPicker(false);
 }
 
 $('pickSearch').addEventListener('input', renderPickList);
@@ -335,8 +715,37 @@ $('pickClear').addEventListener('click', () => {
   $('pickDlg').close();
 });
 
+function openToppings(initial, onChange) {
+  let selected = [...initial];
+  $('toppingList').replaceChildren(...TOPPINGS.map((t) => {
+    const label = document.createElement('label');
+    label.className = 'topping-row';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = selected.includes(t.name);
+    box.addEventListener('change', () => {
+      const others = selected.filter((name) => name !== t.name);
+      selected = box.checked ? [...others, t.name] : others;
+      onChange(selected);
+    });
+    const name = document.createElement('span');
+    name.textContent = t.name;
+    const price = document.createElement('span');
+    price.className = 'pick-price';
+    price.textContent = `+${t.p}k`;
+    label.append(box, name, price);
+    return label;
+  }));
+  $('toppingDlg').showModal();
+}
+
+$('toppingClose').addEventListener('click', () => $('toppingDlg').close());
+
 // Lưu khi rời trang, xoá hết
-window.addEventListener('pagehide', saveNow);
+window.addEventListener('pagehide', () => {
+  saveNow();
+  saveReason();
+});
 
 $('clearBtn').addEventListener('click', () => {
   if (draft.every((c) => !c.name)) return;
@@ -347,7 +756,8 @@ $('clearBtn').addEventListener('click', () => {
   saveNow();
 });
 
-// Dữ liệu realtime của hôm nay
+// ----- Dữ liệu realtime của hôm nay -----
+
 onValue(ref(db, `orders/${day}`), (snap) => {
   orders = snap.val() || {};
   showBanner('');
@@ -355,7 +765,15 @@ onValue(ref(db, `orders/${day}`), (snap) => {
     loadDraft();
     syncStatus();
   }
-  renderOthers();
+  renderAll();
+}, (err) => {
+  console.error(err);
+  showBanner('Chưa đọc được dữ liệu từ Firebase.');
+});
+
+onValue(ref(db, `extras/${day}`), (snap) => {
+  extras = snap.val() || {};
+  renderAll();
 }, (err) => {
   console.error(err);
   showBanner('Chưa đọc được dữ liệu từ Firebase.');
@@ -373,14 +791,18 @@ onValue(ref(db, '.info/connected'), (snap) => {
 
 // Để tab qua đêm thì sang ngày mới tự có danh sách mới.
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) saveNow();
-  else if (dayKey() !== day && !dirty) location.reload();
+  if (document.hidden) {
+    saveNow();
+    saveReason();
+  } else if (dayKey() !== day && !dirty) {
+    location.reload();
+  }
 });
 
 // Khởi động
 const now = new Date();
 $('date').textContent = `${WEEKDAYS[now.getDay()]}, ${pad(now.getDate())}/${pad(now.getMonth() + 1)}`;
 draft.forEach((_, i) => renderTier(i));
-renderOthers();
+renderAll();
 if (me) setMe(me);
 else $('whoDlg').showModal();
